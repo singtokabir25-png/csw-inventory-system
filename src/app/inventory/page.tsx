@@ -171,7 +171,7 @@ export default function InventoryPage() {
         <header className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 gap-4">
           <div>
             <p className="text-slate-400 font-medium italic underline decoration-blue-500 text-sm">CSW Inventory Management</p>
-            <h2 className="text-2xl md:text-3xl font-black text-slate-800 tracking-tight">คลังวัสดุของคุณกบีร์</h2>
+            <h2 className="text-2xl md:text-3xl font-black text-slate-800 tracking-tight">คลังสินค้า</h2>
           </div>
           {(role === 'gold' || role === 'admin') && (
             <button onClick={() => router.push('/inventory/add')} className="w-full md:w-auto bg-slate-900 text-white px-6 py-4 rounded-2xl font-bold shadow-lg">
