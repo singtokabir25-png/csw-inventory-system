@@ -184,7 +184,7 @@ export default function InventoryPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
           <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100">
             <p className="text-slate-400 text-[10px] font-black uppercase mb-1">Total Weight</p>
-            <h3 className="text-2xl font-black text-slate-800">{totalWeight.toLocaleString()} <span className="text-sm font-medium">กก.</span></h3>
+            <h3 className="text-2xl font-black text-slate-800">{totalWeight.toLocaleString()} <span className="text-sm font-medium">  ก.</span></h3>
           </div>
           <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100">
             <p className="text-slate-400 text-[10px] font-black uppercase mb-1">Total Boxes</p>

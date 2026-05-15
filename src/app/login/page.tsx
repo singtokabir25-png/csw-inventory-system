@@ -18,7 +18,6 @@ export default function LoginPage() {
     setLoading(true)
     setErrorMsg('')
 
-    // 1. ตรวจสอบ Email และ Password ผ่าน Supabase Auth
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
@@ -28,19 +27,15 @@ export default function LoginPage() {
       setErrorMsg('อีเมลหรือรหัสผ่านไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง')
       setLoading(false)
     } else if (data?.user) {
-      // 🔥 2. ถ้า Login สำเร็จ บันทึกประวัติลงตาราง stock_logs ตาม Schema จริง
       try {
         await supabase.from('stock_logs').insert({
-          user_id: data.user.id,        // เก็บ ID ของผู้ใช้เพื่อ Join ไปเอา Email/Name
-          action_type: 'LOGIN',         // กำหนดประเภทกิจกรรม
-          details: `เข้าสู่ระบบจากหน้า Login (${email})` // รายละเอียดกิจกรรม
+          user_id: data.user.id,
+          action_type: 'LOGIN',
+          details: `เข้าสู่ระบบจากหน้า Login (${email})`
         })
       } catch (logError) {
-        // บันทึก Log ไม่สำเร็จแต่ยังให้เข้าระบบต่อได้
         console.error('Failed to record log:', logError)
       }
-
-      // 3. นำทางไปหน้า Inventory
       router.push('/inventory')
       router.refresh()
     }
@@ -99,7 +94,24 @@ export default function LoginPage() {
             </button>
           </form>
 
-          {/* Footer Note */}
+          {/* --- เพิ่มปุ่ม Visitor ตรงนี้ --- */}
+          <div className="relative my-8">
+            <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-slate-100"></span></div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-white px-4 text-slate-400 font-medium">หรือเข้าชมในฐานะบุคคลทั่วไป</span>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => router.push('/products')}
+            className="w-full bg-white text-slate-600 py-4 rounded-2xl font-bold border-2 border-slate-100 hover:bg-slate-50 hover:border-slate-200 transition-all flex items-center justify-center gap-2 group"
+          >
+            <span className="group-hover:scale-125 transition-transform">🔍</span> 
+            ดูรายการสินค้าทั้งหมด
+          </button>
+          {/* --------------------------- */}
+
           <p className="text-center text-slate-400 text-xs mt-8">
             © 2026 CSW System. All rights reserved.
           </p>

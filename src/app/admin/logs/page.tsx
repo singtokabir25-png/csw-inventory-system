@@ -17,7 +17,7 @@ export default function LogsPage() {
   const fetchLogs = async () => {
     setLoading(true)
     try {
-      const { data, error } = await supabase
+      const { data, error } = await supabase 
         .from('stock_logs')
         .select(`
           *,
