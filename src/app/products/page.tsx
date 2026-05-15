@@ -42,7 +42,7 @@ export default async function PublicShowcase() {
                 </div>
                 <div className="text-right">
                   <p className="text-2xl font-black text-blue-600">
-                    {p.weight} <span className="text-xs font-bold text-slate-400 uppercase">กก.</span>
+                    {p.stock_quantity} <span className="text-xs font-bold text-slate-400 uppercase">กก.</span>
                   </p>
                 </div>
               </div>
