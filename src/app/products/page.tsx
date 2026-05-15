@@ -20,7 +20,7 @@ export default async function PublicShowcase() {
           href="/login" 
           className="px-5 py-2 bg-white text-slate-600 rounded-full text-sm font-bold shadow-sm border border-slate-200 hover:bg-slate-50 transition-colors flex items-center gap-2"
         >
-          ← เข้าสู่ระบบ (Admin)
+          ← เข้าสู่ระบบ 
         </Link>
       </div>
 
