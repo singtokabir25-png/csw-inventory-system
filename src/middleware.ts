@@ -42,8 +42,11 @@ export async function middleware(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
 
   // 🛡️ Logic การเตือนกลับหน้า Login:
-  // ถ้าไม่มี User และไม่ได้อยู่ที่หน้า /login ให้เตือนกลับไปที่หน้า /login ทันที
-  if (!user && !request.nextUrl.pathname.startsWith('/login')) {
+  // แก้ไข: เพิ่มเงื่อนไข && !request.nextUrl.pathname.startsWith('/products')
+  // เพื่อให้หน้า /products เป็นหน้าสาธารณะ (Public)
+  if (!user && 
+      !request.nextUrl.pathname.startsWith('/login') && 
+      !request.nextUrl.pathname.startsWith('/products')) {
     return NextResponse.redirect(new URL('/login', request.url))
   }
 
@@ -59,11 +62,7 @@ export async function middleware(request: NextRequest) {
 export const config = {
   matcher: [
     /*
-     * ครอบคลุมทุกหน้ายกเว้น:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * - public folder
+     * ครอบคลุมทุกหน้ายกเว้นไฟล์ static และไฟล์รูปภาพ
      */
     '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
