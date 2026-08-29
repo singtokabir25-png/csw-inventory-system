@@ -46,11 +46,17 @@ export default function ProductShowcaseClient({
       setIsAdmin(false)
       return
     }
-    const { data: profile } = await supabase
+    const { data: profile, error } = await supabase
       .from('users')
       .select('role')
       .eq('id', userId)
       .single()
+
+    // DEBUG: เปิด console (F12) ดูตรงนี้เพื่อหาสาเหตุที่ isAdmin ไม่ true
+    console.log('[admin-check] auth uid:', userId)
+    console.log('[admin-check] profile row:', profile)
+    console.log('[admin-check] error:', error)
+
     setIsAdmin(profile?.role === 'admin')
   }
 
