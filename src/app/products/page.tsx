@@ -2,7 +2,6 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 import { supabase } from '@/utils/supabase/client'
-import Link from 'next/link'
 import ProductShowcaseClient from './ProductShowcaseClient'
 
 export default async function PublicShowcase() {
@@ -11,42 +10,24 @@ export default async function PublicShowcase() {
     .select('id, name, product_code, stock_quantity, boxes, image_url')
     .order('product_code', { ascending: true })
 
-  // Check whether the logged-in user is an admin (only admins can edit in the popup).
-  // NOTE: assumes a "users" table with an "id" (matching auth uid) and "role" column,
-  // like the one shown in your screenshot. Adjust table/column names if different.
-  let isAdmin = false
-  const { data: { user } } = await supabase.auth.getUser()
-  if (user) {
-    const { data: profile } = await supabase
-      .from('users')
-      .select('role')
-      .eq('id', user.id)
-      .single()
-    isAdmin = profile?.role === 'admin'
-  }
-
   const fallbackImage = "https://images.unsplash.com/photo-1586075010633-2470fd205553?q=80&w=1000&auto=format&fit=crop"
 
   return (
     <div className="min-h-screen bg-slate-50 p-6 relative overflow-hidden">
-      {/* Back to login button */}
-      <div className="max-w-6xl mx-auto flex justify-end mb-4">
-        <Link
-          href="/login"
-          className="px-5 py-2 bg-white text-slate-600 rounded-full text-sm font-bold shadow-sm border border-slate-200 hover:bg-slate-50 transition-colors flex items-center gap-2"
-        >
-          ← Sign In
-        </Link>
-      </div>
-
-      <header className="max-w-6xl mx-auto mb-10 text-center">
+      <header className="max-w-6xl mx-auto mb-10 text-center relative">
         <h1 className="text-4xl font-bold text-slate-800 tracking-tight">Product Catalog</h1>
         <p className="text-slate-500 mt-2 font-medium">The latest product lineup and stock levels in our warehouse</p>
       </header>
 
+      {/* 
+        ProductShowcaseClient ตอนนี้จัดการทุกอย่างเองฝั่ง client:
+        - carousel การ์ดสินค้า
+        - popup view details
+        - ปุ่ม login มุมขวาบน + popup login
+        - เช็ค role admin หลัง login แล้วโชว์ปุ่ม edit ทันที
+      */}
       <ProductShowcaseClient
         products={products || []}
-        isAdmin={isAdmin}
         fallbackImage={fallbackImage}
       />
 
