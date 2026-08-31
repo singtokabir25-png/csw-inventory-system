@@ -47,7 +47,7 @@ export default function ProductShowcaseClient({
       return
     }
     const { data: profile, error } = await supabase
-      .from('users')
+      .from('profiles')
       .select('role')
       .eq('id', userId)
       .single()
