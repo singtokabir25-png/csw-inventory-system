@@ -10,6 +10,7 @@ type Product = {
   stock_quantity: number | null
   boxes: number | null
   image_url: string | null
+  detail: string | null
 }
 
 export default function ProductShowcaseClient({
@@ -153,6 +154,7 @@ export default function ProductShowcaseClient({
         stock_quantity: form.stock_quantity,
         boxes: form.boxes,
         image_url: form.image_url,
+        detail: form.detail,
       })
       .eq('id', selected.id)
 
@@ -403,6 +405,21 @@ export default function ProductShowcaseClient({
                     <p className="text-lg font-black text-slate-700">{selected.boxes || 0}</p>
                   )}
                 </div>
+              </div>
+
+              <div className="mt-5">
+                <p className="text-xs font-bold text-slate-400 uppercase mb-1">รายละเอียดเพิ่มเติม</p>
+                {isEditing ? (
+                  <textarea
+                    className="w-full text-sm text-slate-700 border border-slate-200 rounded-lg p-2 focus:border-blue-500 outline-none resize-none"
+                    rows={4}
+                    value={form.detail || ''}
+                    onChange={(e) => setForm({ ...form, detail: e.target.value })}
+                    placeholder="เช่น วัสดุ, ที่มา, คุณภาพ, หมายเหตุอื่นๆ"
+                  />
+                ) : (
+                  <p className="text-sm text-slate-700 whitespace-pre-wrap">{selected.detail || '—'}</p>
+                )}
               </div>
 
               {/* Admin-only controls — โผล่ทันทีหลัง login เป็น admin สำเร็จ ไม่ต้อง refresh */}
