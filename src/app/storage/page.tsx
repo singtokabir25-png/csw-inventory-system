@@ -13,6 +13,7 @@ type StorageItem = {
   duration_unit: 'day' | 'week' | 'month'
   due_date: string
   image_url: string | null
+  location: string | null
   created_at: string
 }
 
@@ -50,8 +51,11 @@ export default function StoragePage() {
     deposit_date: new Date().toISOString().slice(0, 10),
     duration_value: 30,
     duration_unit: 'day' as 'day' | 'week' | 'month',
-    image_url: '',
+    location: '',
   })
+  const [imageFile, setImageFile] = useState<File | null>(null)
+  const [imagePreview, setImagePreview] = useState<string>('')
+  const [uploading, setUploading] = useState(false)
 
   const supabase = createClient()
   const router = useRouter()
@@ -95,13 +99,44 @@ export default function StoragePage() {
       deposit_date: new Date().toISOString().slice(0, 10),
       duration_value: 30,
       duration_unit: 'day',
-      image_url: '',
+      location: '',
     })
+    if (imagePreview) URL.revokeObjectURL(imagePreview)
+    setImageFile(null)
+    setImagePreview('')
+  }
+
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setImageFile(file)
+    setImagePreview(URL.createObjectURL(file))
+  }
+
+  // อัปโหลดรูปขึ้น bucket "products" (bucket เดิมที่ใช้เก็บรูปสินค้าอยู่แล้ว)
+  const uploadImage = async (): Promise<string | null> => {
+    if (!imageFile) return null
+    setUploading(true)
+    const ext = imageFile.name.split('.').pop()
+    const fileName = `storage-items/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
+
+    const { error: uploadError } = await supabase.storage.from('products').upload(fileName, imageFile)
+    setUploading(false)
+
+    if (uploadError) {
+      alert('อัปโหลดรูปไม่สำเร็จ: ' + uploadError.message)
+      return null
+    }
+
+    const { data } = supabase.storage.from('products').getPublicUrl(fileName)
+    return data.publicUrl
   }
 
   const handleAdd = async () => {
     if (!form.name || form.quantity <= 0 || form.duration_value <= 0) return
     setLoading(true)
+
+    const imageUrl = imageFile ? await uploadImage() : null
 
     const dueDate = calculateDueDate(form.deposit_date, form.duration_value, form.duration_unit)
 
@@ -112,7 +147,8 @@ export default function StoragePage() {
       duration_value: form.duration_value,
       duration_unit: form.duration_unit,
       due_date: dueDate.toISOString().slice(0, 10),
-      image_url: form.image_url || null,
+      image_url: imageUrl,
+      location: form.location || null,
       created_by: userId,
     })
 
@@ -234,6 +270,7 @@ export default function StoragePage() {
                 <tr className="border-b bg-slate-50/30 text-[10px] uppercase tracking-widest text-slate-400 font-black">
                   <th className="px-8 py-6">Item</th>
                   <th className="px-8 py-6 text-right">Quantity</th>
+                  <th className="px-8 py-6">Location</th>
                   <th className="px-8 py-6">Deposit Date</th>
                   <th className="px-8 py-6">Due Date</th>
                   <th className="px-8 py-6 text-center">Status</th>
@@ -254,6 +291,7 @@ export default function StoragePage() {
                         <p className="font-black text-slate-800 text-lg leading-tight">{item.name}</p>
                       </td>
                       <td className="px-8 py-6 text-right font-black text-xl text-slate-900">{Number(item.quantity).toLocaleString()}</td>
+                      <td className="px-8 py-6 text-sm text-slate-600 font-bold">{item.location || '—'}</td>
                       <td className="px-8 py-6 text-sm text-slate-500 font-medium">{item.deposit_date}</td>
                       <td className="px-8 py-6 text-sm text-slate-500 font-medium">{item.due_date}</td>
                       <td className="px-8 py-6 text-center">
@@ -279,7 +317,7 @@ export default function StoragePage() {
                 })}
                 {items.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-8 py-12 text-center text-slate-400 font-medium">ยังไม่มีรายการของฝาก</td>
+                    <td colSpan={7} className="px-8 py-12 text-center text-slate-400 font-medium">ยังไม่มีรายการของฝาก</td>
                   </tr>
                 )}
               </tbody>
@@ -301,6 +339,7 @@ export default function StoragePage() {
                     <div className="flex-1">
                       <p className="font-black text-slate-800 leading-tight">{item.name}</p>
                       <p className="text-sm text-slate-500 mt-1">จำนวน: {Number(item.quantity).toLocaleString()}</p>
+                      {item.location && <p className="text-sm text-slate-600 font-bold">📍 {item.location}</p>}
                       <p className="text-[11px] text-slate-400">ฝาก {item.deposit_date} · ครบ {item.due_date}</p>
                     </div>
                   </div>
@@ -326,14 +365,14 @@ export default function StoragePage() {
         {/* Add modal */}
         {showAddModal && (
           <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4" onClick={() => setShowAddModal(false)}>
-            <div className="bg-white rounded-[32px] p-8 w-full max-w-md shadow-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="bg-white rounded-[32px] p-8 w-full max-w-md shadow-2xl max-h-[90vh] overflow-y-auto [color-scheme:light]" onClick={(e) => e.stopPropagation()}>
               <h4 className="text-xl font-black text-slate-800 mb-6">เพิ่มของฝากใหม่</h4>
 
               <label className="text-xs font-black uppercase text-slate-400 mb-1 block">ชื่อสินค้า</label>
               <input
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-4 outline-none focus:border-blue-500"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-4 outline-none focus:border-blue-500 text-slate-800"
                 placeholder="เช่น เหล็กม้วน A"
               />
 
@@ -342,7 +381,7 @@ export default function StoragePage() {
                 type="number"
                 value={form.quantity || ''}
                 onChange={(e) => setForm({ ...form, quantity: Number(e.target.value) })}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-4 outline-none focus:border-blue-500"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-4 outline-none focus:border-blue-500 text-slate-800"
                 placeholder="0"
               />
 
@@ -351,7 +390,7 @@ export default function StoragePage() {
                 type="date"
                 value={form.deposit_date}
                 onChange={(e) => setForm({ ...form, deposit_date: e.target.value })}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-4 outline-none focus:border-blue-500"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-4 outline-none focus:border-blue-500 text-slate-800"
               />
 
               <label className="text-xs font-black uppercase text-slate-400 mb-1 block">ระยะเวลาที่ฝาก</label>
@@ -360,13 +399,13 @@ export default function StoragePage() {
                   type="number"
                   value={form.duration_value || ''}
                   onChange={(e) => setForm({ ...form, duration_value: Number(e.target.value) })}
-                  className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-blue-500"
+                  className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-blue-500 text-slate-800"
                   placeholder="30"
                 />
                 <select
                   value={form.duration_unit}
                   onChange={(e) => setForm({ ...form, duration_unit: e.target.value as any })}
-                  className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-blue-500 font-bold"
+                  className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-blue-500 font-bold text-slate-800"
                 >
                   <option value="day">วัน</option>
                   <option value="week">สัปดาห์</option>
@@ -382,18 +421,45 @@ export default function StoragePage() {
                 </p>
               )}
 
-              <label className="text-xs font-black uppercase text-slate-400 mb-1 block">รูปภาพ (URL)</label>
+              <label className="text-xs font-black uppercase text-slate-400 mb-1 block">สถานที่จัดเก็บ</label>
               <input
-                value={form.image_url}
-                onChange={(e) => setForm({ ...form, image_url: e.target.value })}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-6 outline-none focus:border-blue-500"
-                placeholder="https://..."
+                value={form.location}
+                onChange={(e) => setForm({ ...form, location: e.target.value })}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-4 outline-none focus:border-blue-500 text-slate-800"
+                placeholder="เช่น โกดัง 1, โกดังใหม่"
               />
+
+              <label className="text-xs font-black uppercase text-slate-400 mb-1 block">รูปภาพ</label>
+              <div className="mb-6">
+                {imagePreview ? (
+                  <div className="relative w-full h-40 rounded-xl overflow-hidden border border-slate-200 mb-2">
+                    <img src={imagePreview} className="w-full h-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (imagePreview) URL.revokeObjectURL(imagePreview)
+                        setImageFile(null)
+                        setImagePreview('')
+                      }}
+                      className="absolute top-2 right-2 w-7 h-7 bg-white/90 rounded-full flex items-center justify-center text-slate-600 font-bold shadow"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ) : (
+                  <label className="flex flex-col items-center justify-center w-full h-32 bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100 transition-colors">
+                    <span className="text-2xl mb-1">📷</span>
+                    <span className="text-xs font-bold text-slate-400">แตะเพื่ือเลือกรูปภาพ</span>
+                    <input type="file" accept="image/*" onChange={handleImageChange} className="hidden" />
+                  </label>
+                )}
+                {uploading && <p className="text-xs text-blue-500 font-bold mt-2">กำลังอัปโหลดรูป...</p>}
+              </div>
 
               <div className="flex flex-col gap-2">
                 <button
                   onClick={handleAdd}
-                  disabled={loading}
+                  disabled={loading || uploading}
                   className="w-full py-4 rounded-xl font-black bg-slate-900 text-white active:scale-95 transition disabled:opacity-60"
                 >
                   {loading ? 'กำลังบันทึก...' : 'บันทึก'}
