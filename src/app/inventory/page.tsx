@@ -51,9 +51,11 @@ export default function StoragePage() {
     deposit_date: new Date().toISOString().slice(0, 10),
     duration_value: 30,
     duration_unit: 'day' as 'day' | 'week' | 'month',
-    image_url: '',
     location: '',
   })
+  const [imageFile, setImageFile] = useState<File | null>(null)
+  const [imagePreview, setImagePreview] = useState<string>('')
+  const [uploading, setUploading] = useState(false)
 
   const supabase = createClient()
   const router = useRouter()
@@ -97,14 +99,44 @@ export default function StoragePage() {
       deposit_date: new Date().toISOString().slice(0, 10),
       duration_value: 30,
       duration_unit: 'day',
-      image_url: '',
       location: '',
     })
+    if (imagePreview) URL.revokeObjectURL(imagePreview)
+    setImageFile(null)
+    setImagePreview('')
+  }
+
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setImageFile(file)
+    setImagePreview(URL.createObjectURL(file))
+  }
+
+  // อัปโหลดรูปขึ้น bucket "products" (bucket เดิมที่ใช้เก็บรูปสินค้าอยู่แล้ว)
+  const uploadImage = async (): Promise<string | null> => {
+    if (!imageFile) return null
+    setUploading(true)
+    const ext = imageFile.name.split('.').pop()
+    const fileName = `storage-items/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
+
+    const { error: uploadError } = await supabase.storage.from('products').upload(fileName, imageFile)
+    setUploading(false)
+
+    if (uploadError) {
+      alert('อัปโหลดรูปไม่สำเร็จ: ' + uploadError.message)
+      return null
+    }
+
+    const { data } = supabase.storage.from('products').getPublicUrl(fileName)
+    return data.publicUrl
   }
 
   const handleAdd = async () => {
     if (!form.name || form.quantity <= 0 || form.duration_value <= 0) return
     setLoading(true)
+
+    const imageUrl = imageFile ? await uploadImage() : null
 
     const dueDate = calculateDueDate(form.deposit_date, form.duration_value, form.duration_unit)
 
@@ -115,7 +147,7 @@ export default function StoragePage() {
       duration_value: form.duration_value,
       duration_unit: form.duration_unit,
       due_date: dueDate.toISOString().slice(0, 10),
-      image_url: form.image_url || null,
+      image_url: imageUrl,
       location: form.location || null,
       created_by: userId,
     })
@@ -397,18 +429,37 @@ export default function StoragePage() {
                 placeholder="เช่น โกดัง 1, โกดังใหม่"
               />
 
-              <label className="text-xs font-black uppercase text-slate-400 mb-1 block">รูปภาพ (URL)</label>
-              <input
-                value={form.image_url}
-                onChange={(e) => setForm({ ...form, image_url: e.target.value })}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-6 outline-none focus:border-blue-500 text-slate-800"
-                placeholder="https://..."
-              />
+              <label className="text-xs font-black uppercase text-slate-400 mb-1 block">รูปภาพ</label>
+              <div className="mb-6">
+                {imagePreview ? (
+                  <div className="relative w-full h-40 rounded-xl overflow-hidden border border-slate-200 mb-2">
+                    <img src={imagePreview} className="w-full h-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (imagePreview) URL.revokeObjectURL(imagePreview)
+                        setImageFile(null)
+                        setImagePreview('')
+                      }}
+                      className="absolute top-2 right-2 w-7 h-7 bg-white/90 rounded-full flex items-center justify-center text-slate-600 font-bold shadow"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ) : (
+                  <label className="flex flex-col items-center justify-center w-full h-32 bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100 transition-colors">
+                    <span className="text-2xl mb-1">📷</span>
+                    <span className="text-xs font-bold text-slate-400">แตะเพื่ือเลือกรูปภาพ</span>
+                    <input type="file" accept="image/*" onChange={handleImageChange} className="hidden" />
+                  </label>
+                )}
+                {uploading && <p className="text-xs text-blue-500 font-bold mt-2">กำลังอัปโหลดรูป...</p>}
+              </div>
 
               <div className="flex flex-col gap-2">
                 <button
                   onClick={handleAdd}
-                  disabled={loading}
+                  disabled={loading || uploading}
                   className="w-full py-4 rounded-xl font-black bg-slate-900 text-white active:scale-95 transition disabled:opacity-60"
                 >
                   {loading ? 'กำลังบันทึก...' : 'บันทึก'}
