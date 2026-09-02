@@ -446,7 +446,7 @@ export default function ProductShowcaseClient({
                     </>
                   ) : (
                     <button
-                      onClick={() => setIsEditing(true)}
+                      onClick={() => setIsEditing(true) }
                       className="flex-1 bg-slate-800 hover:bg-slate-900 text-white font-bold text-sm py-2.5 rounded-xl transition-colors"
                     >
                       Edit Details
