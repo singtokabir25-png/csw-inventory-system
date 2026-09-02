@@ -255,7 +255,7 @@ export default function CheckStoragePage() {
         </div>
 
         <footer className="text-center mt-16 pt-8 border-t border-slate-200">
-          <p className="text-slate-400 text-sm font-medium">© หากต้องการต่ออายุสัญญาฝากสินค้าหรือเบิกสินค้าออก กรุณาติดต่อเจ้าหน้าที่ผ่านช่องทาง cswchocksuwit7893csw@gmail.com.</p>
+          <p className="text-slate-400 text-sm font-medium">© หากต้องการต่ออายุสัญญาฝากสินค้าหรือเบิกสินค้าออก กรุณาติดต่อเจ้าหน้าที่ผ่านช่องทาง chocksuwit7893csw@gmail.com.</p>
         </footer>
       </div>
     </div>
