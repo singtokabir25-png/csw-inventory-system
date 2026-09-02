@@ -139,8 +139,10 @@ export default function InventoryPage() {
         <nav className="flex-1 px-4 space-y-2">
           <a href="/inventory" className="flex items-center gap-3 bg-blue-50 text-blue-600 px-4 py-3 rounded-xl font-bold">📦 สต็อกสินค้า</a>
           {(role === 'gold' || role === 'admin') && (
-            <a href="/dashboard" className="flex items-center gap-3 text-slate-500 hover:bg-slate-50 px-4 py-3 rounded-xl transition">📊 Dashboard</a>
-            <a href="/storage" className="flex items-center gap-3 text-slate-500 hover:bg-slate-50 px-4 py-3 rounded-xl transition font-medium">🗄️ ของฝาก</a>
+            <>
+              <a href="/dashboard" className="flex items-center gap-3 text-slate-500 hover:bg-slate-50 px-4 py-3 rounded-xl transition">📊 Dashboard</a>
+              <a href="/storage" className="flex items-center gap-3 text-slate-500 hover:bg-slate-50 px-4 py-3 rounded-xl transition font-medium">🗄️ ของฝาก</a>
+            </>
           )}
           {role === 'admin' && (
             <a href="/admin/users" className="flex items-center gap-3 text-slate-500 hover:bg-slate-50 px-4 py-3 rounded-xl transition font-medium">👥 จัดการพนักงาน</a>
