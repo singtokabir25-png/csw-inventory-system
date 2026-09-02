@@ -42,11 +42,12 @@ export async function middleware(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
 
   // 🛡️ Logic การเตือนกลับหน้า Login:
-  // แก้ไข: เพิ่มเงื่อนไข && !request.nextUrl.pathname.startsWith('/products')
-  // เพื่อให้หน้า /products เป็นหน้าสาธารณะ (Public)
-  if (!user && 
-      !request.nextUrl.pathname.startsWith('/login') && 
-      !request.nextUrl.pathname.startsWith('/products')) {
+  // เพิ่ม /check-storage เข้าไปในรายการหน้า public ด้วย
+  // เพื่อให้ผู้ฝากสแกน QR เข้ามาเช็คสถานะได้โดยไม่ต้อง login
+  const publicPaths = ['/login', '/products', '/check-storage']
+  const isPublicPath = publicPaths.some((path) => request.nextUrl.pathname.startsWith(path))
+
+  if (!user && !isPublicPath) {
     return NextResponse.redirect(new URL('/login', request.url))
   }
 
