@@ -20,12 +20,11 @@ export default function ProductShowcaseClient({
   products: Product[]
   fallbackImage: string
 }) {
-  // ---------- Auth / Admin state (ทั้งหมดเช็คฝั่ง client ล้วนๆ) ----------
+
   const [userEmail, setUserEmail] = useState<string | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
   const [checkingAuth, setCheckingAuth] = useState(true)
 
-  // ---------- Login popup state ----------
   const [showLogin, setShowLogin] = useState(false)
   const [loginVisible, setLoginVisible] = useState(false)
   const [email, setEmail] = useState('')
@@ -33,7 +32,6 @@ export default function ProductShowcaseClient({
   const [loginError, setLoginError] = useState('')
   const [loggingIn, setLoggingIn] = useState(false)
 
-  // ---------- Product detail modal state ----------
   const [selected, setSelected] = useState<Product | null>(null)
   const [visible, setVisible] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
@@ -41,7 +39,6 @@ export default function ProductShowcaseClient({
   const [saving, setSaving] = useState(false)
   const [localProducts, setLocalProducts] = useState<Product[]>(products)
 
-  // เช็ค role จากตาราง users แล้วอัปเดต isAdmin
   const refreshAdminStatus = async (userId: string | null) => {
     if (!userId) {
       setIsAdmin(false)
