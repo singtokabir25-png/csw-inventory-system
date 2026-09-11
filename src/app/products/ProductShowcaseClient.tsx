@@ -319,7 +319,7 @@ export default function ProductShowcaseClient({
 
           function pump(): Promise<Blob> {
             return reader.read().then(({ done, value }) => {
-              if (done) return new Blob(chunks, { type: "video/mp4" });
+              if (done) return new Blob(chunks as BlobPart[], { type: "video/mp4" });
               chunks.push(value);
               got += value.length;
               setProgress(total ? got / total : Math.min(got / 11e6, 0.95));
