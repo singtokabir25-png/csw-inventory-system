@@ -1,460 +1,719 @@
-'use client'
+"use client";
 
-import { useState, useEffect } from 'react'
-import { supabase } from '@/utils/supabase/client'
+import { useEffect, useRef } from "react";
 
-type Product = {
-  id: string
-  name: string | null
-  product_code: string | null
-  stock_quantity: number | null
-  boxes: number | null
-  image_url: string | null
-  detail: string | null
-}
-
-export default function ProductShowcaseClient({
-  products,
-  fallbackImage,
-}: {
-  products: Product[]
-  fallbackImage: string
-}) {
-
-  const [userEmail, setUserEmail] = useState<string | null>(null)
-  const [isAdmin, setIsAdmin] = useState(false)
-  const [checkingAuth, setCheckingAuth] = useState(true)
-
-  const [showLogin, setShowLogin] = useState(false)
-  const [loginVisible, setLoginVisible] = useState(false)
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [loginError, setLoginError] = useState('')
-  const [loggingIn, setLoggingIn] = useState(false)
-
-  const [selected, setSelected] = useState<Product | null>(null)
-  const [visible, setVisible] = useState(false)
-  const [isEditing, setIsEditing] = useState(false)
-  const [form, setForm] = useState<Partial<Product>>({})
-  const [saving, setSaving] = useState(false)
-  const [localProducts, setLocalProducts] = useState<Product[]>(products)
-
-  const refreshAdminStatus = async (userId: string | null) => {
-    if (!userId) {
-      setIsAdmin(false)
-      return
-    }
-    const { data: profile, error } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', userId)
-      .single()
-
-    // DEBUG: เปิด console (F12) ดูตรงนี้เพื่อหาสาเหตุที่ isAdmin ไม่ true
-    console.log('[admin-check] auth uid:', userId)
-    console.log('[admin-check] profile row:', profile)
-    console.log('[admin-check] error:', error)
-
-    setIsAdmin(profile?.role === 'admin')
-  }
-
-  // เช็ค session ตอนโหลดหน้า + ฟังการเปลี่ยนแปลงสถานะ login/logout แบบ realtime
-  useEffect(() => {
-    const init = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      setUserEmail(user?.email ?? null)
-      await refreshAdminStatus(user?.id ?? null)
-      setCheckingAuth(false)
-    }
-    init()
-
-    const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      setUserEmail(session?.user?.email ?? null)
-      await refreshAdminStatus(session?.user?.id ?? null)
-    })
-
-    return () => listener.subscription.unsubscribe()
-  }, [])
-
-  // ---------- Login modal handlers ----------
-  const openLogin = () => {
-    setLoginError('')
-    setEmail('')
-    setPassword('')
-    setShowLogin(true)
-    requestAnimationFrame(() => setLoginVisible(true))
-  }
-
-  const closeLogin = () => {
-    setLoginVisible(false)
-    setTimeout(() => setShowLogin(false), 200)
-  }
-
-  const handleLogin = async () => {
-    setLoggingIn(true)
-    setLoginError('')
-
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-
-    setLoggingIn(false)
-
-    if (error) {
-      setLoginError('อีเมลหรือรหัสผ่านไม่ถูกต้อง')
-      return
-    }
-
-    closeLogin()
-    // onAuthStateChange ด้านบนจะอัปเดต userEmail / isAdmin ให้อัตโนมัติ
-  }
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut()
-    setUserEmail(null)
-    setIsAdmin(false)
-  }
-
-  // ---------- Product detail modal handlers ----------
-  const openModal = (p: Product) => {
-    setSelected(p)
-    setForm(p)
-    setIsEditing(false)
-    requestAnimationFrame(() => setVisible(true))
-  }
-
-  const closeModal = () => {
-    setVisible(false)
-    setTimeout(() => {
-      setSelected(null)
-      setIsEditing(false)
-    }, 200)
-  }
+/**
+ * Cast & Render — scroll-scrubbed video showcase.
+ *
+ * ทั้งหน้าไม่ได้เลื่อนคอนเทนต์จริงๆ — .track เป็นตัวเดียวที่ให้ความสูงหน้า
+ * แล้วใช้ scroll position มา scrub เฟรมวิดีโอพื้นหลังแบบ fixed เต็มจอ พร้อม
+ * cross-fade ข้อความ 3 แผงทับด้านบน
+ *
+ * เนื้อหา/วิดีโอตอนนี้เป็น placeholder ของ "Cast & Render" (สตูดิโอ 3D สมมติ)
+ * ตามที่ตกลงไว้ — เปลี่ยน VIDEO_URL และข้อความใน PANEL COPY ทีหลังได้เลย
+ */
+export default function ProductShowcaseClient() {
+  const clipRef = useRef<HTMLVideoElement>(null);
+  const bootRef = useRef<HTMLDivElement>(null);
+  const bootBarRef = useRef<HTMLElement>(null);
+  const bootPctRef = useRef<HTMLParagraphElement>(null);
+  const meterRef = useRef<HTMLElement>(null);
+  const panelRefs = useRef<Array<HTMLElement | null>>([]);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        closeModal()
-        closeLogin()
+    const clip = clipRef.current;
+    const boot = bootRef.current;
+    const bootBar = bootBarRef.current;
+    const bootPct = bootPctRef.current;
+    const meter = meterRef.current;
+    const panels = panelRefs.current.filter(Boolean) as HTMLElement[];
+    if (!clip || !boot || !bootBar || !bootPct || !meter) return;
+
+    // 1920x1080, 10.04s, 241 frames, all-intra — ทุกเฟรมเป็น keyframe ทำให้ scrub
+    // ไปเฟรมไหนก็ได้ทันทีโดยไม่ต้อง decode ย้อนจาก keyframe ก่อนหน้า
+    const VIDEO_URL =
+      "https://d2ol7oe51mr4n9.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/45567745-d826-44a2-a5ce-7ef670944e60.mp4";
+
+    // แต่ละแผงมีช่วง scroll ของตัวเอง [fadeInStart, fadeInEnd, fadeOutStart, fadeOutEnd]
+    // ในสเกล 0..1 ของทั้งหน้า ช่วงว่างระหว่าง fadeOutEnd ของแผงหนึ่งกับ fadeInStart ของ
+    // แผงถัดไปคือโซนที่ตั้งใจเว้นไว้ให้เห็นแต่วิดีโอ ไม่ให้สองแผงอ่านพร้อมกัน
+    const CUES: [number, number, number, number][] = [
+      [0.0, 0.0, 0.15, 0.23],
+      [0.35, 0.43, 0.57, 0.65],
+      [0.77, 0.85, 1.1, 1.2],
+    ];
+    const DRIFT = 22; // px ระยะ counter-scroll ต่อแผง
+
+    const clampV = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
+    const smooth = (t: number) => t * t * (3 - 2 * t);
+    const ramp = (p: number, a: number, b: number) => {
+      if (b <= a) return p >= b ? 1 : 0;
+      return smooth(clampV((p - a) / (b - a), 0, 1));
+    };
+
+    let progress = 0;
+    let seekTo = 0;
+    let seekAt = 0;
+    let duration = 0;
+    let ready = false;
+    let started = false;
+    let attached = false;
+    let rafId = 0;
+
+    function readScroll() {
+      const max = document.documentElement.scrollHeight - window.innerHeight;
+      progress = max > 0 ? clampV(window.pageYOffset / max, 0, 1) : 0;
+      if (duration) seekTo = progress * duration;
+    }
+
+    function paint() {
+      if (meter) meter.style.transform = "scaleX(" + progress + ")";
+      panels.forEach((el, i) => {
+        const c = CUES[i];
+        const enter = ramp(progress, c[0], c[1]);
+        const leave = ramp(progress, c[2], c[3]);
+        const o = enter * (1 - leave);
+        const y = (1 - enter) * DRIFT - leave * DRIFT;
+        el.style.opacity = String(o);
+        el.style.transform = "translate3d(0," + y + "px,0)";
+        el.style.pointerEvents = o > 0.6 ? "auto" : "none";
+      });
+    }
+
+    function frame() {
+      if (ready && duration && clip) {
+        const gap = seekTo - seekAt;
+        if (Math.abs(gap) > 0.0008) {
+          // ปัจจัยการ ease นี้ห้ามเปลี่ยน — คือสิ่งที่ทำให้การ scrub ลื่นแทนที่จะกระตุก
+          seekAt += gap * 0.115;
+          if (clip.readyState >= 2 && !clip.seeking) {
+            try {
+              clip.currentTime = seekAt;
+            } catch {
+              /* ignore */
+            }
+          }
+        }
+      }
+      paint();
+      rafId = requestAnimationFrame(frame);
+    }
+
+    function setProgress(f: number) {
+      if (bootBar) bootBar.style.transform = "scaleX(" + f + ")";
+      if (bootPct) bootPct.textContent = "LOADING " + Math.round(f * 100) + "%";
+    }
+
+    function start() {
+      if (started) return;
+      started = true;
+      ready = true;
+      boot?.classList.add("done");
+      readScroll();
+      seekAt = seekTo;
+    }
+
+    function attach(src: string) {
+      if (attached || !clip) return;
+      attached = true;
+
+      clip.addEventListener("loadedmetadata", () => {
+        duration = clip.duration || 0;
+        clip.pause();
+        readScroll();
+        seekAt = seekTo;
+        try {
+          clip.currentTime = seekAt;
+        } catch {
+          /* ignore */
+        }
+      });
+      clip.addEventListener("loadeddata", start);
+      clip.addEventListener("canplaythrough", start);
+      clip.addEventListener("error", start);
+
+      clip.src = src;
+      clip.load();
+      setTimeout(start, 12000); // กันไม่ให้ decode ค้างแล้วหน้าเว็บติดอยู่หลัง preloader ตลอดไป
+    }
+
+    function preload() {
+      const canAbort = typeof AbortController !== "undefined";
+      const controller = canAbort ? new AbortController() : null;
+
+      const bail = setTimeout(() => {
+        if (!attached) {
+          controller?.abort();
+          setProgress(1);
+          attach(VIDEO_URL);
+        }
+      }, 15000);
+
+      fetch(VIDEO_URL, controller ? { signal: controller.signal } : undefined)
+        .then((res) => {
+          if (!res.ok || !res.body) throw new Error("bad response");
+          const total = Number(res.headers.get("content-length")) || 0;
+          const reader = res.body.getReader();
+          const chunks: Uint8Array[] = [];
+          let got = 0;
+
+          function pump(): Promise<Blob> {
+            return reader.read().then(({ done, value }) => {
+              if (done) return new Blob(chunks, { type: "video/mp4" });
+              chunks.push(value);
+              got += value.length;
+              setProgress(total ? got / total : Math.min(got / 11e6, 0.95));
+              return pump();
+            });
+          }
+          return pump();
+        })
+        .then((blob) => {
+          clearTimeout(bail);
+          setProgress(1);
+          attach(URL.createObjectURL(blob));
+        })
+        .catch(() => {
+          // ครอบคลุมทั้ง CORS fail, abort, และออฟไลน์ — ตกลงไปสตรีมจาก URL ตรงแทน
+          clearTimeout(bail);
+          setProgress(1);
+          attach(VIDEO_URL);
+        });
+    }
+
+    // iOS จะไม่วาดเฟรมจากวิดีโอที่ไม่เคย play เลย เลย "จิ้ม" ให้เล่นแวบเดียวแล้ว pause
+    // ทันทีตั้งแต่ interaction แรกของผู้ใช้
+    function unlock() {
+      const p = clip?.play();
+      if (p && typeof p.then === "function") {
+        p.then(() => clip?.pause()).catch(() => {});
+      } else {
+        clip?.pause();
       }
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
+    const unlockEvents: (keyof WindowEventMap)[] = [
+      "touchstart",
+      "pointerdown",
+      "wheel",
+      "keydown",
+    ];
+    unlockEvents.forEach((ev) =>
+      window.addEventListener(ev, unlock, { once: true, passive: true })
+    );
 
-  const handleSave = async () => {
-    if (!selected) return
-    setSaving(true)
+    window.addEventListener("scroll", readScroll, { passive: true });
+    window.addEventListener("resize", readScroll);
 
-    const { error } = await supabase
-      .from('products')
-      .update({
-        name: form.name,
-        stock_quantity: form.stock_quantity,
-        boxes: form.boxes,
-        image_url: form.image_url,
-        detail: form.detail,
-      })
-      .eq('id', selected.id)
+    readScroll();
+    paint();
+    preload();
+    rafId = requestAnimationFrame(frame);
 
-    setSaving(false)
-
-    if (!error) {
-      const updated = { ...selected, ...form } as Product
-      setLocalProducts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)))
-      setSelected(updated)
-      setIsEditing(false)
-    } else {
-      alert('Failed to save: ' + error.message)
-    }
-  }
+    return () => {
+      cancelAnimationFrame(rafId);
+      window.removeEventListener("scroll", readScroll);
+      window.removeEventListener("resize", readScroll);
+      unlockEvents.forEach((ev) => window.removeEventListener(ev, unlock));
+    };
+  }, []);
 
   return (
     <>
-      {/* Top-right account bar */}
-      <div className="max-w-6xl mx-auto flex justify-end mb-4 -mt-2">
-        {checkingAuth ? null : userEmail ? (
-          <div className="flex items-center gap-3 px-4 py-2 bg-white rounded-full text-sm shadow-sm border border-slate-200">
-            <span className="text-slate-600 font-medium">
-              {userEmail} {isAdmin && <span className="text-blue-600 font-bold">· Admin</span>}
-            </span>
-            <button
-              onClick={handleLogout}
-              className="text-slate-400 hover:text-red-500 font-bold transition-colors"
-            >
-              Logout
-            </button>
-          </div>
-        ) : (
-          <button
-            onClick={openLogin}
-            className="px-5 py-2 bg-white text-slate-600 rounded-full text-sm font-bold shadow-sm border border-slate-200 hover:bg-slate-50 transition-colors flex items-center gap-2"
-          >
-            ← Sign In
-          </button>
-        )}
+      <div className="boot" id="boot" ref={bootRef}>
+        <div className="bar">
+          <i id="bootBar" ref={bootBarRef as any} />
+        </div>
+        <p id="bootPct" ref={bootPctRef}>
+          LOADING 0%
+        </p>
       </div>
 
-      {/* Carousel */}
-      <div className="relative max-w-6xl mx-auto">
-        <div className="pointer-events-none absolute left-0 top-0 bottom-0 w-16 bg-gradient-to-r from-slate-50 to-transparent z-10" />
-        <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-16 bg-gradient-to-l from-slate-50 to-transparent z-10" />
-
-        <div className="flex gap-8 overflow-x-auto snap-x snap-mandatory pb-8 pt-4 px-4 -mx-4 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-          {localProducts.map((p) => {
-            const isAvailable = !!p.stock_quantity && p.stock_quantity > 0
-
-            return (
-              <div
-                key={p.id}
-                className="snap-center shrink-0 w-[320px] bg-white rounded-3xl overflow-hidden shadow-md hover:shadow-2xl transition-all duration-500 group border border-slate-100 hover:-translate-y-2 hover:rotate-1"
-              >
-                <div className="h-64 overflow-hidden bg-slate-200 relative">
-                  <img
-                    src={p.image_url?.trim() || fallbackImage}
-                    className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
-                    alt={p.name || ''}
-                  />
-                  <div className="absolute inset-0 bg-black/5 group-hover:bg-transparent transition-colors" />
-                </div>
-
-                <div className="p-7">
-                  <div className="flex justify-between items-start mb-4">
-                    <div>
-                      <h3 className="text-xl font-extrabold text-slate-800 leading-tight mb-1">
-                        {p.name || 'Unnamed Product'}
-                      </h3>
-                      <code className="text-[10px] bg-slate-100 px-2 py-0.5 rounded text-slate-500 uppercase font-mono">
-                        CODE: {p.product_code}
-                      </code>
-                    </div>
-                    <div className="text-right">
-                      <p className={`text-2xl font-black ${isAvailable ? 'text-blue-600' : 'text-slate-400'}`}>
-                        {p.stock_quantity?.toLocaleString() || '0'}
-                        <span className="text-xs font-bold text-slate-400 uppercase ml-1">kg</span>
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between mt-6 pt-5 border-t border-slate-50">
-                    <div className="flex items-center gap-1.5">
-                      <div className={`w-2.5 h-2.5 rounded-full animate-pulse ${isAvailable ? 'bg-green-500' : 'bg-red-500'}`} />
-                      <span className={`text-sm font-bold ${isAvailable ? 'text-slate-700' : 'text-red-500'}`}>
-                        {isAvailable ? `In Stock · ${p.boxes || 0} boxes` : 'Out of Stock'}
-                      </span>
-                    </div>
-                    <button
-                      onClick={() => openModal(p)}
-                      className="text-xs font-bold text-blue-600 hover:underline"
-                    >
-                      View Details
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )
-          })}
-        </div>
+      <div className="stage">
+        <video
+          id="clip"
+          ref={clipRef}
+          muted
+          playsInline
+          preload="auto"
+          disablePictureInPicture
+        />
+        <div className="veil" />
+        <div className="grain" />
       </div>
 
-      {/* ---------- Login popup ---------- */}
-      {showLogin && (
-        <div
-          className={`fixed inset-0 z-[60] flex items-center justify-center p-4 transition-opacity duration-200 ${
-            loginVisible ? 'opacity-100' : 'opacity-0'
-          }`}
-          onClick={closeLogin}
-        >
-          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" />
+      <i className="meter" id="meter" ref={meterRef as any} />
 
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className={`relative bg-white w-full max-w-sm rounded-3xl overflow-hidden shadow-2xl p-8 transform transition-all duration-200 ease-out ${
-              loginVisible ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-95 translate-y-4'
-            }`}
-          >
-            <button
-              onClick={closeLogin}
-              className="absolute top-4 right-4 w-9 h-9 rounded-full bg-slate-50 flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition-colors"
-              aria-label="Close"
-            >
-              ✕
-            </button>
-
-            <h2 className="text-2xl font-black text-slate-800 mb-1">
-              Happy <span className="text-blue-600">Inventory</span>
-            </h2>
-            <p className="text-slate-500 text-sm mb-6">เข้าสู่ระบบเพื่อจัดการสต็อกสินค้า</p>
-
-            <label className="text-sm font-bold text-slate-600 mb-1 block">อีเมลพนักงาน</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-4 outline-none focus:border-blue-500"
-              placeholder="you@example.com"
-            />
-
-            <label className="text-sm font-bold text-slate-600 mb-1 block">รหัสผ่าน</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-2 outline-none focus:border-blue-500"
-              placeholder="••••••••"
-            />
-
-            {loginError && <p className="text-red-500 text-sm font-medium mb-2">{loginError}</p>}
-
-            <button
-              onClick={handleLogin}
-              disabled={loggingIn}
-              className="w-full mt-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-bold py-3 rounded-xl transition-colors"
-            >
-              {loggingIn ? 'กำลังเข้าสู่ระบบ...' : 'เข้าสู่ระบบ'}
-            </button>
-          </div>
+      <header className="chrome">
+        <div className="mark">
+          <span className="mark-star" aria-hidden="true">
+            &#10037;
+          </span>
+          &nbsp;Cast &amp; Render
         </div>
-      )}
+        <nav className="nav">
+          <a href="#board">Works</a>
+          <a href="#visit">About</a>
+          <a className="pill" href="#order">
+            Start a brief
+          </a>
+        </nav>
+      </header>
 
-      {/* ---------- Product detail modal ---------- */}
-      {selected && (
-        <div
-          className={`fixed inset-0 z-50 flex items-center justify-center p-4 transition-opacity duration-200 ${
-            visible ? 'opacity-100' : 'opacity-0'
-          }`}
-          onClick={closeModal}
+      <main className="panels">
+        <section
+          className="panel"
+          data-panel
+          ref={(el) => {
+            panelRefs.current[0] = el;
+          }}
         >
-          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" />
-
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className={`relative bg-white w-full max-w-md rounded-3xl overflow-hidden shadow-2xl transform transition-all duration-200 ease-out ${
-              visible ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-95 translate-y-4'
-            }`}
-          >
-            <button
-              onClick={closeModal}
-              className="absolute top-4 right-4 z-10 w-9 h-9 rounded-full bg-white/90 backdrop-blur flex items-center justify-center text-slate-600 hover:bg-white hover:text-slate-900 shadow transition-colors"
-              aria-label="Close"
-            >
-              ✕
-            </button>
-
-            <div className="h-72 bg-slate-200 overflow-hidden relative">
-              {isEditing ? (
-                <input
-                  className="absolute bottom-3 left-3 right-3 text-xs bg-white/90 rounded-lg px-3 py-2 shadow"
-                  placeholder="Image URL"
-                  value={form.image_url || ''}
-                  onChange={(e) => setForm({ ...form, image_url: e.target.value })}
-                />
-              ) : null}
-              <img
-                src={(isEditing ? form.image_url : selected.image_url)?.trim() || fallbackImage}
-                className="w-full h-full object-cover"
-                alt={selected.name || ''}
-              />
-            </div>
-
-            <div className="p-7">
-              <code className="text-[10px] bg-slate-100 px-2 py-0.5 rounded text-slate-500 uppercase font-mono">
-                CODE: {selected.product_code}
-              </code>
-
-              {isEditing ? (
-                <input
-                  className="mt-2 w-full text-2xl font-extrabold text-slate-800 border-b border-slate-200 focus:border-blue-500 outline-none pb-1"
-                  value={form.name || ''}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                />
-              ) : (
-                <h2 className="mt-2 text-2xl font-extrabold text-slate-800">
-                  {selected.name || 'Unnamed Product'}
-                </h2>
-              )}
-
-              <div className="grid grid-cols-2 gap-4 mt-6">
-                <div>
-                  <p className="text-xs font-bold text-slate-400 uppercase mb-1">Stock (kg)</p>
-                  {isEditing ? (
-                    <input
-                      type="number"
-                      className="w-full text-lg font-black text-blue-600 border-b border-slate-200 focus:border-blue-500 outline-none"
-                      value={form.stock_quantity ?? 0}
-                      onChange={(e) => setForm({ ...form, stock_quantity: Number(e.target.value) })}
-                    />
-                  ) : (
-                    <p className="text-lg font-black text-blue-600">
-                      {selected.stock_quantity?.toLocaleString() || '0'}
-                    </p>
-                  )}
-                </div>
-                <div>
-                  <p className="text-xs font-bold text-slate-400 uppercase mb-1">Boxes</p>
-                  {isEditing ? (
-                    <input
-                      type="number"
-                      className="w-full text-lg font-black text-slate-700 border-b border-slate-200 focus:border-blue-500 outline-none"
-                      value={form.boxes ?? 0}
-                      onChange={(e) => setForm({ ...form, boxes: Number(e.target.value) })}
-                    />
-                  ) : (
-                    <p className="text-lg font-black text-slate-700">{selected.boxes || 0}</p>
-                  )}
-                </div>
-              </div>
-
-              <div className="mt-5">
-                <p className="text-xs font-bold text-slate-400 uppercase mb-1">รายละเอียดเพิ่มเติม</p>
-                {isEditing ? (
-                  <textarea
-                    className="w-full text-sm text-slate-700 border border-slate-200 rounded-lg p-2 focus:border-blue-500 outline-none resize-none"
-                    rows={4}
-                    value={form.detail || ''}
-                    onChange={(e) => setForm({ ...form, detail: e.target.value })}
-                    placeholder="เช่น วัสดุ, ที่มา, คุณภาพ, หมายเหตุอื่นๆ"
-                  />
-                ) : (
-                  <p className="text-sm text-slate-700 whitespace-pre-wrap">{selected.detail || '—'}</p>
-                )}
-              </div>
-
-              {/* Admin-only controls — โผล่ทันทีหลัง login เป็น admin สำเร็จ ไม่ต้อง refresh */}
-              {isAdmin && (
-                <div className="flex gap-3 mt-8 pt-5 border-t border-slate-100">
-                  {isEditing ? (
-                    <>
-                      <button
-                        onClick={handleSave}
-                        disabled={saving}
-                        className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-bold text-sm py-2.5 rounded-xl transition-colors"
-                      >
-                        {saving ? 'Saving...' : 'Save Changes'}
-                      </button>
-                      <button
-                        onClick={() => {
-                          setForm(selected)
-                          setIsEditing(false)
-                        }}
-                        className="px-5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-sm py-2.5 rounded-xl transition-colors"
-                      >
-                        Cancel
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      onClick={() => setIsEditing(true) }
-                      className="flex-1 bg-slate-800 hover:bg-slate-900 text-white font-bold text-sm py-2.5 rounded-xl transition-colors"
-                    >
-                      Edit Details
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
+          <div className="eyebrow">
+            Objects studio <span>&middot;</span> No. 112 Render Lane
           </div>
-        </div>
-      )}
+          <h1>
+            Built at four.
+            <br />
+            Out by seven.
+          </h1>
+          <p className="sub">
+            Six kinds of mesh, one render farm, and a queue that starts before the sun does.
+          </p>
+          <div className="cta">
+            <a className="pill" href="#board">
+              View the reel
+            </a>
+          </div>
+        </section>
+
+        <section
+          className="panel"
+          data-panel
+          ref={(el) => {
+            panelRefs.current[1] = el;
+          }}
+        >
+          <div className="eyebrow">Across the studio</div>
+          <h1>Flat, never bent.</h1>
+          <p className="sub">
+            The mesh should still be clean when it reaches the viewport. We export to order, never before.
+          </p>
+          <div className="cta">
+            <a className="pill" href="#visit">
+              Tour our space
+            </a>
+          </div>
+        </section>
+
+        <section
+          className="panel"
+          data-panel
+          ref={(el) => {
+            panelRefs.current[2] = el;
+          }}
+        >
+          <div className="eyebrow">The surface</div>
+          <h1>
+            Smooth enough to
+            <br />
+            hold a light pass.
+          </h1>
+          <p className="sub">
+            Custom surface shaders whipped every morning, spread to the edge and weighed by the quarter pound.
+          </p>
+          <div className="cta">
+            <a className="pill" href="#order">
+              Start a brief
+            </a>
+          </div>
+        </section>
+      </main>
+
+      <footer className="foot">112 Render Lane &nbsp;&middot;&nbsp; Tue–Sun, 9am till sold out</footer>
+
+      <div className="track" />
+
+      <style jsx global>{`
+        @import url("https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500&display=swap");
+
+        :root {
+          --fg: #0d0c0b;
+          --fg-soft: rgba(13, 12, 11, 0.64);
+          --fg-faint: rgba(13, 12, 11, 0.42);
+          --shade: #f2f0ec;
+          --rule: rgba(13, 12, 11, 0.16);
+          --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+          --pill-bg: #0a0908;
+          --pill-fg: #ffffff;
+        }
+
+        html {
+          -webkit-text-size-adjust: 100%;
+        }
+
+        body {
+          background: var(--shade);
+          color: var(--fg);
+          font-family: "Inter Tight", "Helvetica Neue", Helvetica, Arial, sans-serif;
+          font-weight: 400;
+          -webkit-font-smoothing: antialiased;
+          -moz-osx-font-smoothing: grayscale;
+          overflow-x: hidden;
+        }
+
+        .boot {
+          position: fixed;
+          inset: 0;
+          z-index: 90;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 16px;
+          background: var(--shade);
+          transition: opacity 0.7s var(--ease), visibility 0.7s;
+        }
+        .boot.done {
+          opacity: 0;
+          visibility: hidden;
+        }
+        .boot p {
+          font-size: 12.5px;
+          letter-spacing: 0.05em;
+          color: var(--fg-faint);
+        }
+        .bar {
+          width: 150px;
+          height: 1px;
+          background: var(--rule);
+          overflow: hidden;
+        }
+        .bar i {
+          display: block;
+          height: 100%;
+          width: 100%;
+          background: var(--fg);
+          transform: scaleX(0);
+          transform-origin: 0 50%;
+        }
+
+        .stage {
+          position: fixed;
+          inset: 0;
+          z-index: 0;
+          overflow: hidden;
+          background: var(--shade);
+        }
+        .stage video {
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          width: 100%;
+          height: 100%;
+          transform: translate(-50%, -50%) scale(1.02);
+          object-fit: cover;
+          filter: contrast(1.02);
+          will-change: transform;
+        }
+
+        .veil {
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          background: linear-gradient(
+              to bottom,
+              rgba(242, 240, 236, 0.62) 0%,
+              rgba(242, 240, 236, 0.12) 22%,
+              rgba(242, 240, 236, 0.12) 78%,
+              rgba(242, 240, 236, 0.66) 100%
+            ),
+            radial-gradient(100% 80% at 50% 48%, rgba(242, 240, 236, 0) 0%, rgba(242, 240, 236, 0.34) 100%),
+            rgba(242, 240, 236, 0.2);
+        }
+
+        .grain {
+          position: absolute;
+          inset: -50%;
+          opacity: 0.13;
+          mix-blend-mode: multiply;
+          pointer-events: none;
+          background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/></filter><rect width='140' height='140' filter='url(%23n)' opacity='.5'/></svg>");
+        }
+
+        .chrome {
+          position: fixed;
+          left: 0;
+          right: 0;
+          top: 0;
+          z-index: 40;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          padding: max(14px, calc(env(safe-area-inset-top, 0px) + 12px)) clamp(16px, 3.4vw, 44px) 14px;
+          background: linear-gradient(to bottom, rgba(242, 240, 236, 0.94) 0%, rgba(242, 240, 236, 0.78) 72%, rgba(242, 240, 236, 0) 100%);
+        }
+
+        .mark {
+          display: flex;
+          align-items: center;
+          gap: 9px;
+          font-size: 15px;
+          letter-spacing: -0.012em;
+          color: var(--fg);
+          min-width: 0;
+          flex-shrink: 1;
+        }
+        .mark-star {
+          opacity: 0.85;
+        }
+
+        .nav {
+          display: flex;
+          align-items: center;
+          gap: clamp(14px, 2.4vw, 32px);
+          flex-shrink: 0;
+        }
+        .nav a:not(.pill) {
+          color: var(--fg);
+          text-decoration: none;
+          font-size: 14.5px;
+          letter-spacing: -0.008em;
+          opacity: 0.88;
+          transition: opacity 0.3s var(--ease);
+        }
+        .nav a:not(.pill):hover {
+          opacity: 1;
+        }
+
+        .pill {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          height: 40px;
+          padding: 0 21px;
+          border-radius: 999px;
+          background: var(--pill-bg);
+          color: var(--pill-fg);
+          font-size: 14.5px;
+          font-weight: 500;
+          letter-spacing: -0.008em;
+          text-decoration: none;
+          white-space: nowrap;
+          opacity: 1;
+          border: 1px solid rgba(10, 9, 8, 0.12);
+          box-shadow: 0 1px 0 rgba(255, 255, 255, 0.1) inset;
+          -webkit-text-fill-color: var(--pill-fg);
+          transition: transform 0.4s var(--ease), background 0.3s var(--ease), color 0.3s var(--ease);
+        }
+        .nav .pill {
+          color: #fff;
+          -webkit-text-fill-color: #fff;
+        }
+        .pill:hover,
+        .pill:focus-visible {
+          transform: translateY(-2px);
+          background: #000;
+          color: #fff;
+          -webkit-text-fill-color: #fff;
+        }
+        .pill:focus-visible {
+          outline: 2px solid var(--fg);
+          outline-offset: 2px;
+        }
+
+        .foot {
+          position: fixed;
+          bottom: 0;
+          left: 0;
+          right: 0;
+          z-index: 40;
+          display: flex;
+          justify-content: center;
+          padding: 14px clamp(16px, 4vw, 24px) max(16px, calc(env(safe-area-inset-bottom, 0px) + 12px));
+          font-size: 12px;
+          line-height: 1.45;
+          letter-spacing: 0.02em;
+          color: var(--fg-faint);
+          text-align: center;
+          pointer-events: none;
+          background: linear-gradient(to top, rgba(242, 240, 236, 0.92) 0%, rgba(242, 240, 236, 0.72) 72%, rgba(242, 240, 236, 0) 100%);
+        }
+
+        .meter {
+          position: fixed;
+          top: 0;
+          left: 0;
+          z-index: 50;
+          height: 2px;
+          width: 100%;
+          transform: scaleX(0);
+          transform-origin: 0 50%;
+          background: var(--fg);
+          opacity: 0.55;
+        }
+
+        .panels {
+          position: fixed;
+          inset: 0;
+          z-index: 20;
+          pointer-events: none;
+        }
+        .panel {
+          position: absolute;
+          inset: 0;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          text-align: center;
+          padding: max(104px, calc(env(safe-area-inset-top, 0px) + 88px)) clamp(20px, 5vw, 60px)
+            max(96px, calc(env(safe-area-inset-bottom, 0px) + 80px));
+          opacity: 0;
+          will-change: opacity, transform;
+        }
+
+        .eyebrow {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-wrap: wrap;
+          gap: 6px 12px;
+          font-size: 12.5px;
+          letter-spacing: 0.045em;
+          color: var(--fg-soft);
+          margin-bottom: clamp(16px, 2vw, 22px);
+          max-width: min(46ch, 100%);
+          text-align: center;
+        }
+
+        .panel h1 {
+          font-weight: 400;
+          font-size: clamp(34px, 7.1vw, 104px);
+          line-height: 0.98;
+          letter-spacing: -0.036em;
+          max-width: 15ch;
+          text-wrap: balance;
+        }
+
+        .sub {
+          margin-top: clamp(18px, 2.2vw, 28px);
+          font-size: clamp(15px, 1.28vw, 19px);
+          line-height: 1.5;
+          letter-spacing: -0.008em;
+          color: var(--fg-soft);
+          max-width: min(46ch, 100%);
+          text-wrap: pretty;
+        }
+
+        .cta {
+          margin-top: clamp(28px, 3.4vw, 44px);
+          pointer-events: auto;
+          width: 100%;
+          display: flex;
+          justify-content: center;
+        }
+        .cta .pill {
+          height: 48px;
+          padding: 0 27px;
+          font-size: 15px;
+          max-width: min(100%, 320px);
+        }
+
+        .track {
+          position: relative;
+          z-index: 1;
+          height: 560vh;
+          min-height: 3200px;
+        }
+
+        @media (max-width: 900px) {
+          .veil {
+            background: linear-gradient(
+                to bottom,
+                rgba(242, 240, 236, 0.72) 0%,
+                rgba(242, 240, 236, 0.18) 24%,
+                rgba(242, 240, 236, 0.18) 76%,
+                rgba(242, 240, 236, 0.74) 100%
+              ),
+              radial-gradient(100% 80% at 50% 48%, rgba(242, 240, 236, 0) 0%, rgba(242, 240, 236, 0.4) 100%),
+              rgba(242, 240, 236, 0.24);
+          }
+        }
+
+        @media (max-width: 720px) {
+          .nav a:not(.pill) {
+            display: none;
+          }
+          .mark {
+            font-size: 14px;
+          }
+          .nav .pill {
+            height: 38px;
+            padding: 0 16px;
+            font-size: 13.5px;
+          }
+          .panel h1 {
+            max-width: 12ch;
+            font-size: clamp(30px, 9.8vw, 52px);
+          }
+          .sub {
+            font-size: 15px;
+            max-width: 34ch;
+          }
+          .panel {
+            padding: max(92px, calc(env(safe-area-inset-top, 0px) + 76px)) 18px
+              max(88px, calc(env(safe-area-inset-bottom, 0px) + 72px));
+          }
+          .foot {
+            font-size: 11px;
+            max-width: 34ch;
+          }
+        }
+
+        @media (max-width: 420px) {
+          .mark-star {
+            display: none;
+          }
+          .nav .pill {
+            height: 36px;
+            padding: 0 14px;
+            font-size: 13px;
+          }
+          .panel h1 {
+            max-width: 11ch;
+            font-size: clamp(28px, 10.5vw, 40px);
+          }
+          .eyebrow {
+            font-size: 11px;
+            letter-spacing: 0.04em;
+            max-width: 28ch;
+          }
+          .cta .pill {
+            width: 100%;
+            max-width: 280px;
+            height: 44px;
+            padding: 0 20px;
+            font-size: 14px;
+          }
+        }
+
+        @media (max-height: 520px) and (orientation: landscape) {
+          .panel {
+            padding: max(72px, calc(env(safe-area-inset-top, 0px) + 56px)) 24px
+              max(64px, calc(env(safe-area-inset-bottom, 0px) + 48px));
+          }
+          .panel h1 {
+            font-size: clamp(28px, 8vh, 44px);
+          }
+          .sub {
+            margin-top: 12px;
+            font-size: 14px;
+          }
+          .cta {
+            margin-top: 16px;
+          }
+        }
+      `}</style>
     </>
-  )
+  );
 }
