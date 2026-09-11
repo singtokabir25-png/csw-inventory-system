@@ -1,24 +1,195 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { supabase } from "@/utils/supabase/client";
 
-/**
- * Cast & Render — scroll-scrubbed video showcase.
- *
- * ทั้งหน้าไม่ได้เลื่อนคอนเทนต์จริงๆ — .track เป็นตัวเดียวที่ให้ความสูงหน้า
- * แล้วใช้ scroll position มา scrub เฟรมวิดีโอพื้นหลังแบบ fixed เต็มจอ พร้อม
- * cross-fade ข้อความ 3 แผงทับด้านบน
- *
- * เนื้อหา/วิดีโอตอนนี้เป็น placeholder ของ "Cast & Render" (สตูดิโอ 3D สมมติ)
- * ตามที่ตกลงไว้ — เปลี่ยน VIDEO_URL และข้อความใน PANEL COPY ทีหลังได้เลย
- */
-export default function ProductShowcaseClient() {
+type Product = {
+  id: string;
+  name: string | null;
+  product_code: string | null;
+  stock_quantity: number | null;
+  boxes: number | null;
+  image_url: string | null;
+  detail: string | null;
+};
+
+export default function ProductShowcaseClient({
+  products,
+  fallbackImage,
+}: {
+  products: Product[];
+  fallbackImage: string;
+}) {
+  // ---------------------------------------------------------------
+  // Auth / admin state — เหมือนของเดิมทุกอย่าง ไม่ได้แตะ logic
+  // ---------------------------------------------------------------
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [checkingAuth, setCheckingAuth] = useState(true);
+
+  const [showLogin, setShowLogin] = useState(false);
+  const [loginVisible, setLoginVisible] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [loggingIn, setLoggingIn] = useState(false);
+
+  const [selected, setSelected] = useState<Product | null>(null);
+  const [visible, setVisible] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [form, setForm] = useState<Partial<Product>>({});
+  const [saving, setSaving] = useState(false);
+  const [localProducts, setLocalProducts] = useState<Product[]>(products);
+
+  const refreshAdminStatus = async (userId: string | null) => {
+    if (!userId) {
+      setIsAdmin(false);
+      return;
+    }
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", userId)
+      .single();
+
+    setIsAdmin(profile?.role === "admin");
+  };
+
+  useEffect(() => {
+    const init = async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      setUserEmail(user?.email ?? null);
+      await refreshAdminStatus(user?.id ?? null);
+      setCheckingAuth(false);
+    };
+    init();
+
+    const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      setUserEmail(session?.user?.email ?? null);
+      await refreshAdminStatus(session?.user?.id ?? null);
+    });
+
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
+  const openLogin = () => {
+    setLoginError("");
+    setEmail("");
+    setPassword("");
+    setShowLogin(true);
+    requestAnimationFrame(() => setLoginVisible(true));
+  };
+
+  const closeLogin = () => {
+    setLoginVisible(false);
+    setTimeout(() => setShowLogin(false), 200);
+  };
+
+  const handleLogin = async () => {
+    setLoggingIn(true);
+    setLoginError("");
+
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+
+    setLoggingIn(false);
+
+    if (error) {
+      setLoginError("อีเมลหรือรหัสผ่านไม่ถูกต้อง");
+      return;
+    }
+
+    closeLogin();
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setUserEmail(null);
+    setIsAdmin(false);
+  };
+
+  const openModal = (p: Product) => {
+    setSelected(p);
+    setForm(p);
+    setIsEditing(false);
+    requestAnimationFrame(() => setVisible(true));
+  };
+
+  const closeModal = () => {
+    setVisible(false);
+    setTimeout(() => {
+      setSelected(null);
+      setIsEditing(false);
+    }, 200);
+  };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        closeModal();
+        closeLogin();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const handleSave = async () => {
+    if (!selected) return;
+    setSaving(true);
+
+    const { error } = await supabase
+      .from("products")
+      .update({
+        name: form.name,
+        stock_quantity: form.stock_quantity,
+        boxes: form.boxes,
+        image_url: form.image_url,
+        detail: form.detail,
+      })
+      .eq("id", selected.id);
+
+    setSaving(false);
+
+    if (!error) {
+      const updated = { ...selected, ...form } as Product;
+      setLocalProducts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+      setSelected(updated);
+      setIsEditing(false);
+    } else {
+      alert("Failed to save: " + error.message);
+    }
+  };
+
+  // ---------------------------------------------------------------
+  // Scroll-scrubbed video showcase — สินค้าแต่ละชิ้นได้ "แผง" ของตัวเอง
+  // ที่ fade in/out ตามตำแหน่ง scroll แทนที่จะเป็น carousel เลื่อนแนวนอน
+  //
+  // วิดีโอพื้นหลังตอนนี้ยังเป็น placeholder (ของเดิมจากสเปค Cast & Render) —
+  // แนะนำให้เปลี่ยนเป็นฟุตเทจโกดัง/สินค้าจริงของคุณทีหลังผ่านตัวแปร VIDEO_URL
+  // ด้านล่าง
+  // ---------------------------------------------------------------
   const clipRef = useRef<HTMLVideoElement>(null);
   const bootRef = useRef<HTMLDivElement>(null);
   const bootBarRef = useRef<HTMLElement>(null);
   const bootPctRef = useRef<HTMLParagraphElement>(null);
   const meterRef = useRef<HTMLElement>(null);
   const panelRefs = useRef<Array<HTMLElement | null>>([]);
+
+  const count = Math.max(localProducts.length, 1);
+
+  // แบ่ง scroll 0..1 ออกเป็น "ช่อง" เท่าๆ กันตามจำนวนสินค้า แต่ละช่องมี fade-in
+  // ช่วงต้นกับ fade-out ช่วงท้าย ส่วนตรงกลางแผงจะอยู่นิ่งให้อ่าน/กดปุ่มได้
+  const cues = useMemo<[number, number, number, number][]>(() => {
+    const slot = 1 / count;
+    const fade = slot * 0.32;
+    return Array.from({ length: count }, (_, i) => {
+      const start = i * slot;
+      const end = start + slot;
+      return [start, start + fade, end - fade, end];
+    });
+  }, [count]);
 
   useEffect(() => {
     const clip = clipRef.current;
@@ -29,20 +200,9 @@ export default function ProductShowcaseClient() {
     const panels = panelRefs.current.filter(Boolean) as HTMLElement[];
     if (!clip || !boot || !bootBar || !bootPct || !meter) return;
 
-    // 1920x1080, 10.04s, 241 frames, all-intra — ทุกเฟรมเป็น keyframe ทำให้ scrub
-    // ไปเฟรมไหนก็ได้ทันทีโดยไม่ต้อง decode ย้อนจาก keyframe ก่อนหน้า
     const VIDEO_URL =
       "https://d2ol7oe51mr4n9.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/45567745-d826-44a2-a5ce-7ef670944e60.mp4";
-
-    // แต่ละแผงมีช่วง scroll ของตัวเอง [fadeInStart, fadeInEnd, fadeOutStart, fadeOutEnd]
-    // ในสเกล 0..1 ของทั้งหน้า ช่วงว่างระหว่าง fadeOutEnd ของแผงหนึ่งกับ fadeInStart ของ
-    // แผงถัดไปคือโซนที่ตั้งใจเว้นไว้ให้เห็นแต่วิดีโอ ไม่ให้สองแผงอ่านพร้อมกัน
-    const CUES: [number, number, number, number][] = [
-      [0.0, 0.0, 0.15, 0.23],
-      [0.35, 0.43, 0.57, 0.65],
-      [0.77, 0.85, 1.1, 1.2],
-    ];
-    const DRIFT = 22; // px ระยะ counter-scroll ต่อแผง
+    const DRIFT = 22;
 
     const clampV = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
     const smooth = (t: number) => t * t * (3 - 2 * t);
@@ -69,7 +229,8 @@ export default function ProductShowcaseClient() {
     function paint() {
       if (meter) meter.style.transform = "scaleX(" + progress + ")";
       panels.forEach((el, i) => {
-        const c = CUES[i];
+        const c = cues[i];
+        if (!c) return;
         const enter = ramp(progress, c[0], c[1]);
         const leave = ramp(progress, c[2], c[3]);
         const o = enter * (1 - leave);
@@ -84,7 +245,6 @@ export default function ProductShowcaseClient() {
       if (ready && duration && clip) {
         const gap = seekTo - seekAt;
         if (Math.abs(gap) > 0.0008) {
-          // ปัจจัยการ ease นี้ห้ามเปลี่ยน — คือสิ่งที่ทำให้การ scrub ลื่นแทนที่จะกระตุก
           seekAt += gap * 0.115;
           if (clip.readyState >= 2 && !clip.seeking) {
             try {
@@ -134,7 +294,7 @@ export default function ProductShowcaseClient() {
 
       clip.src = src;
       clip.load();
-      setTimeout(start, 12000); // กันไม่ให้ decode ค้างแล้วหน้าเว็บติดอยู่หลัง preloader ตลอดไป
+      setTimeout(start, 12000);
     }
 
     function preload() {
@@ -174,15 +334,12 @@ export default function ProductShowcaseClient() {
           attach(URL.createObjectURL(blob));
         })
         .catch(() => {
-          // ครอบคลุมทั้ง CORS fail, abort, และออฟไลน์ — ตกลงไปสตรีมจาก URL ตรงแทน
           clearTimeout(bail);
           setProgress(1);
           attach(VIDEO_URL);
         });
     }
 
-    // iOS จะไม่วาดเฟรมจากวิดีโอที่ไม่เคย play เลย เลย "จิ้ม" ให้เล่นแวบเดียวแล้ว pause
-    // ทันทีตั้งแต่ interaction แรกของผู้ใช้
     function unlock() {
       const p = clip?.play();
       if (p && typeof p.then === "function") {
@@ -191,15 +348,8 @@ export default function ProductShowcaseClient() {
         clip?.pause();
       }
     }
-    const unlockEvents: (keyof WindowEventMap)[] = [
-      "touchstart",
-      "pointerdown",
-      "wheel",
-      "keydown",
-    ];
-    unlockEvents.forEach((ev) =>
-      window.addEventListener(ev, unlock, { once: true, passive: true })
-    );
+    const unlockEvents: (keyof WindowEventMap)[] = ["touchstart", "pointerdown", "wheel", "keydown"];
+    unlockEvents.forEach((ev) => window.addEventListener(ev, unlock, { once: true, passive: true }));
 
     window.addEventListener("scroll", readScroll, { passive: true });
     window.addEventListener("resize", readScroll);
@@ -215,7 +365,7 @@ export default function ProductShowcaseClient() {
       window.removeEventListener("resize", readScroll);
       unlockEvents.forEach((ev) => window.removeEventListener(ev, unlock));
     };
-  }, []);
+  }, [cues]);
 
   return (
     <>
@@ -229,14 +379,7 @@ export default function ProductShowcaseClient() {
       </div>
 
       <div className="stage">
-        <video
-          id="clip"
-          ref={clipRef}
-          muted
-          playsInline
-          preload="auto"
-          disablePictureInPicture
-        />
+        <video id="clip" ref={clipRef} muted playsInline preload="auto" disablePictureInPicture />
         <div className="veil" />
         <div className="grain" />
       </div>
@@ -248,89 +391,278 @@ export default function ProductShowcaseClient() {
           <span className="mark-star" aria-hidden="true">
             &#10037;
           </span>
-          &nbsp;Cast &amp; Render
+          &nbsp;Happy Inventory
         </div>
-        <nav className="nav">
-          <a href="#board">Works</a>
-          <a href="#visit">About</a>
-          <a className="pill" href="#order">
-            Start a brief
-          </a>
-        </nav>
+
+        {/* account bar — เดิมอยู่นอก header แบบ static, ย้ายมาไว้ใน chrome แทน nav */}
+        <div className="nav">
+          {checkingAuth ? null : userEmail ? (
+            <div className="account-chip">
+              <span>
+                {userEmail} {isAdmin && <span className="account-admin">· Admin</span>}
+              </span>
+              <button onClick={handleLogout} className="account-logout">
+                Logout
+              </button>
+            </div>
+          ) : (
+            <button onClick={openLogin} className="pill">
+              Sign In
+            </button>
+          )}
+        </div>
       </header>
 
       <main className="panels">
-        <section
-          className="panel"
-          data-panel
-          ref={(el) => {
-            panelRefs.current[0] = el;
-          }}
-        >
-          <div className="eyebrow">
-            Objects studio <span>&middot;</span> No. 112 Render Lane
-          </div>
-          <h1>
-            Built at four.
-            <br />
-            Out by seven.
-          </h1>
-          <p className="sub">
-            Six kinds of mesh, one render farm, and a queue that starts before the sun does.
-          </p>
-          <div className="cta">
-            <a className="pill" href="#board">
-              View the reel
-            </a>
-          </div>
-        </section>
+        {localProducts.length === 0 && (
+          <section className="panel" style={{ opacity: 1 }}>
+            <div className="eyebrow">Product Catalog</div>
+            <h1>ยังไม่มีสินค้า</h1>
+            <p className="sub">เพิ่มสินค้าเข้าระบบเพื่อให้แสดงที่นี่</p>
+          </section>
+        )}
 
-        <section
-          className="panel"
-          data-panel
-          ref={(el) => {
-            panelRefs.current[1] = el;
-          }}
-        >
-          <div className="eyebrow">Across the studio</div>
-          <h1>Flat, never bent.</h1>
-          <p className="sub">
-            The mesh should still be clean when it reaches the viewport. We export to order, never before.
-          </p>
-          <div className="cta">
-            <a className="pill" href="#visit">
-              Tour our space
-            </a>
-          </div>
-        </section>
+        {localProducts.map((p, i) => {
+          const isAvailable = !!p.stock_quantity && p.stock_quantity > 0;
+          return (
+            <section
+              className="panel"
+              data-panel
+              key={p.id}
+              ref={(el) => {
+                panelRefs.current[i] = el;
+              }}
+            >
+              <div className="product-media">
+                <img src={p.image_url?.trim() || fallbackImage} alt={p.name || ""} />
+              </div>
 
-        <section
-          className="panel"
-          data-panel
-          ref={(el) => {
-            panelRefs.current[2] = el;
-          }}
-        >
-          <div className="eyebrow">The surface</div>
-          <h1>
-            Smooth enough to
-            <br />
-            hold a light pass.
-          </h1>
-          <p className="sub">
-            Custom surface shaders whipped every morning, spread to the edge and weighed by the quarter pound.
-          </p>
-          <div className="cta">
-            <a className="pill" href="#order">
-              Start a brief
-            </a>
-          </div>
-        </section>
+              <div className="eyebrow">CODE &middot; {p.product_code || "—"}</div>
+              <h1>{p.name || "Unnamed Product"}</h1>
+              <p className="sub">{p.detail || "ยังไม่มีรายละเอียดเพิ่มเติม"}</p>
+
+              <div className="stat-row">
+                <span className={`stat-dot ${isAvailable ? "in" : "out"}`} />
+                <span className="stat-text">
+                  {isAvailable
+                    ? `${p.stock_quantity?.toLocaleString()} kg in stock · ${p.boxes || 0} boxes`
+                    : "Out of stock"}
+                </span>
+              </div>
+
+              <div className="cta">
+                <button className="pill" onClick={() => openModal(p)}>
+                  View details
+                </button>
+              </div>
+            </section>
+          );
+        })}
       </main>
 
-      <footer className="foot">112 Render Lane &nbsp;&middot;&nbsp; Tue–Sun, 9am till sold out</footer>
+      <footer className="foot">© 2026 Happy Inventory System &nbsp;&middot;&nbsp; CSW Logistics Group</footer>
 
-      <div className="track" />
+      <div className="track" style={{ height: `${count * 140}vh`, minHeight: `${count * 900}px` }} />
+
+      {/* ---------- Login popup (เหมือนเดิมทุกอย่าง) ---------- */}
+      {showLogin && (
+        <div
+          className={`fixed inset-0 z-[60] flex items-center justify-center p-4 transition-opacity duration-200 ${
+            loginVisible ? "opacity-100" : "opacity-0"
+          }`}
+          onClick={closeLogin}
+        >
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" />
+
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className={`relative bg-white w-full max-w-sm rounded-3xl overflow-hidden shadow-2xl p-8 transform transition-all duration-200 ease-out ${
+              loginVisible ? "opacity-100 scale-100 translate-y-0" : "opacity-0 scale-95 translate-y-4"
+            }`}
+          >
+            <button
+              onClick={closeLogin}
+              className="absolute top-4 right-4 w-9 h-9 rounded-full bg-slate-50 flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition-colors"
+              aria-label="Close"
+            >
+              ✕
+            </button>
+
+            <h2 className="text-2xl font-black text-slate-800 mb-1">
+              Happy <span className="text-blue-600">Inventory</span>
+            </h2>
+            <p className="text-slate-500 text-sm mb-6">เข้าสู่ระบบเพื่อจัดการสต็อกสินค้า</p>
+
+            <label className="text-sm font-bold text-slate-600 mb-1 block">อีเมลพนักงาน</label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-4 outline-none focus:border-blue-500"
+              placeholder="you@example.com"
+            />
+
+            <label className="text-sm font-bold text-slate-600 mb-1 block">รหัสผ่าน</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleLogin()}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-2 outline-none focus:border-blue-500"
+              placeholder="••••••••"
+            />
+
+            {loginError && <p className="text-red-500 text-sm font-medium mb-2">{loginError}</p>}
+
+            <button
+              onClick={handleLogin}
+              disabled={loggingIn}
+              className="w-full mt-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-bold py-3 rounded-xl transition-colors"
+            >
+              {loggingIn ? "กำลังเข้าสู่ระบบ..." : "เข้าสู่ระบบ"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ---------- Product detail modal (เหมือนเดิมทุกอย่าง) ---------- */}
+      {selected && (
+        <div
+          className={`fixed inset-0 z-50 flex items-center justify-center p-4 transition-opacity duration-200 ${
+            visible ? "opacity-100" : "opacity-0"
+          }`}
+          onClick={closeModal}
+        >
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" />
+
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className={`relative bg-white w-full max-w-md rounded-3xl overflow-hidden shadow-2xl transform transition-all duration-200 ease-out ${
+              visible ? "opacity-100 scale-100 translate-y-0" : "opacity-0 scale-95 translate-y-4"
+            }`}
+          >
+            <button
+              onClick={closeModal}
+              className="absolute top-4 right-4 z-10 w-9 h-9 rounded-full bg-white/90 backdrop-blur flex items-center justify-center text-slate-600 hover:bg-white hover:text-slate-900 shadow transition-colors"
+              aria-label="Close"
+            >
+              ✕
+            </button>
+
+            <div className="h-72 bg-slate-200 overflow-hidden relative">
+              {isEditing ? (
+                <input
+                  className="absolute bottom-3 left-3 right-3 text-xs bg-white/90 rounded-lg px-3 py-2 shadow"
+                  placeholder="Image URL"
+                  value={form.image_url || ""}
+                  onChange={(e) => setForm({ ...form, image_url: e.target.value })}
+                />
+              ) : null}
+              <img
+                src={(isEditing ? form.image_url : selected.image_url)?.trim() || fallbackImage}
+                className="w-full h-full object-cover"
+                alt={selected.name || ""}
+              />
+            </div>
+
+            <div className="p-7">
+              <code className="text-[10px] bg-slate-100 px-2 py-0.5 rounded text-slate-500 uppercase font-mono">
+                CODE: {selected.product_code}
+              </code>
+
+              {isEditing ? (
+                <input
+                  className="mt-2 w-full text-2xl font-extrabold text-slate-800 border-b border-slate-200 focus:border-blue-500 outline-none pb-1"
+                  value={form.name || ""}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                />
+              ) : (
+                <h2 className="mt-2 text-2xl font-extrabold text-slate-800">
+                  {selected.name || "Unnamed Product"}
+                </h2>
+              )}
+
+              <div className="grid grid-cols-2 gap-4 mt-6">
+                <div>
+                  <p className="text-xs font-bold text-slate-400 uppercase mb-1">Stock (kg)</p>
+                  {isEditing ? (
+                    <input
+                      type="number"
+                      className="w-full text-lg font-black text-blue-600 border-b border-slate-200 focus:border-blue-500 outline-none"
+                      value={form.stock_quantity ?? 0}
+                      onChange={(e) => setForm({ ...form, stock_quantity: Number(e.target.value) })}
+                    />
+                  ) : (
+                    <p className="text-lg font-black text-blue-600">
+                      {selected.stock_quantity?.toLocaleString() || "0"}
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-slate-400 uppercase mb-1">Boxes</p>
+                  {isEditing ? (
+                    <input
+                      type="number"
+                      className="w-full text-lg font-black text-slate-700 border-b border-slate-200 focus:border-blue-500 outline-none"
+                      value={form.boxes ?? 0}
+                      onChange={(e) => setForm({ ...form, boxes: Number(e.target.value) })}
+                    />
+                  ) : (
+                    <p className="text-lg font-black text-slate-700">{selected.boxes || 0}</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-5">
+                <p className="text-xs font-bold text-slate-400 uppercase mb-1">รายละเอียดเพิ่มเติม</p>
+                {isEditing ? (
+                  <textarea
+                    className="w-full text-sm text-slate-700 border border-slate-200 rounded-lg p-2 focus:border-blue-500 outline-none resize-none"
+                    rows={4}
+                    value={form.detail || ""}
+                    onChange={(e) => setForm({ ...form, detail: e.target.value })}
+                    placeholder="เช่น วัสดุ, ที่มา, คุณภาพ, หมายเหตุอื่นๆ"
+                  />
+                ) : (
+                  <p className="text-sm text-slate-700 whitespace-pre-wrap">{selected.detail || "—"}</p>
+                )}
+              </div>
+
+              {isAdmin && (
+                <div className="flex gap-3 mt-8 pt-5 border-t border-slate-100">
+                  {isEditing ? (
+                    <>
+                      <button
+                        onClick={handleSave}
+                        disabled={saving}
+                        className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-bold text-sm py-2.5 rounded-xl transition-colors"
+                      >
+                        {saving ? "Saving..." : "Save Changes"}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setForm(selected);
+                          setIsEditing(false);
+                        }}
+                        className="px-5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-sm py-2.5 rounded-xl transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      onClick={() => setIsEditing(true)}
+                      className="flex-1 bg-slate-800 hover:bg-slate-900 text-white font-bold text-sm py-2.5 rounded-xl transition-colors"
+                    >
+                      Edit Details
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <style jsx global>{`
         @import url("https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500&display=swap");
@@ -344,6 +676,7 @@ export default function ProductShowcaseClient() {
           --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
           --pill-bg: #0a0908;
           --pill-fg: #ffffff;
+          --blue: #2563eb;
         }
 
         html {
@@ -354,7 +687,6 @@ export default function ProductShowcaseClient() {
           background: var(--shade);
           color: var(--fg);
           font-family: "Inter Tight", "Helvetica Neue", Helvetica, Arial, sans-serif;
-          font-weight: 400;
           -webkit-font-smoothing: antialiased;
           -moz-osx-font-smoothing: grayscale;
           overflow-x: hidden;
@@ -421,13 +753,13 @@ export default function ProductShowcaseClient() {
           pointer-events: none;
           background: linear-gradient(
               to bottom,
-              rgba(242, 240, 236, 0.62) 0%,
-              rgba(242, 240, 236, 0.12) 22%,
-              rgba(242, 240, 236, 0.12) 78%,
-              rgba(242, 240, 236, 0.66) 100%
+              rgba(242, 240, 236, 0.68) 0%,
+              rgba(242, 240, 236, 0.22) 22%,
+              rgba(242, 240, 236, 0.22) 78%,
+              rgba(242, 240, 236, 0.72) 100%
             ),
             radial-gradient(100% 80% at 50% 48%, rgba(242, 240, 236, 0) 0%, rgba(242, 240, 236, 0.34) 100%),
-            rgba(242, 240, 236, 0.2);
+            rgba(242, 240, 236, 0.24);
         }
 
         .grain {
@@ -458,6 +790,7 @@ export default function ProductShowcaseClient() {
           align-items: center;
           gap: 9px;
           font-size: 15px;
+          font-weight: 500;
           letter-spacing: -0.012em;
           color: var(--fg);
           min-width: 0;
@@ -470,19 +803,33 @@ export default function ProductShowcaseClient() {
         .nav {
           display: flex;
           align-items: center;
-          gap: clamp(14px, 2.4vw, 32px);
+          gap: 12px;
           flex-shrink: 0;
         }
-        .nav a:not(.pill) {
-          color: var(--fg);
-          text-decoration: none;
-          font-size: 14.5px;
-          letter-spacing: -0.008em;
-          opacity: 0.88;
-          transition: opacity 0.3s var(--ease);
+
+        .account-chip {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          padding: 8px 16px;
+          background: #fff;
+          border: 1px solid var(--rule);
+          border-radius: 999px;
+          font-size: 13px;
+          color: var(--fg-soft);
+          box-shadow: 0 1px 2px rgba(13, 12, 11, 0.04);
         }
-        .nav a:not(.pill):hover {
-          opacity: 1;
+        .account-admin {
+          color: var(--blue);
+          font-weight: 500;
+        }
+        .account-logout {
+          color: var(--fg-faint);
+          font-weight: 500;
+          transition: color 0.3s var(--ease);
+        }
+        .account-logout:hover {
+          color: #dc2626;
         }
 
         .pill {
@@ -499,22 +846,15 @@ export default function ProductShowcaseClient() {
           letter-spacing: -0.008em;
           text-decoration: none;
           white-space: nowrap;
-          opacity: 1;
           border: 1px solid rgba(10, 9, 8, 0.12);
           box-shadow: 0 1px 0 rgba(255, 255, 255, 0.1) inset;
           -webkit-text-fill-color: var(--pill-fg);
-          transition: transform 0.4s var(--ease), background 0.3s var(--ease), color 0.3s var(--ease);
+          cursor: pointer;
+          transition: transform 0.4s var(--ease), background 0.3s var(--ease);
         }
-        .nav .pill {
-          color: #fff;
-          -webkit-text-fill-color: #fff;
-        }
-        .pill:hover,
-        .pill:focus-visible {
+        .pill:hover {
           transform: translateY(-2px);
           background: #000;
-          color: #fff;
-          -webkit-text-fill-color: #fff;
         }
         .pill:focus-visible {
           outline: 2px solid var(--fg);
@@ -531,7 +871,6 @@ export default function ProductShowcaseClient() {
           justify-content: center;
           padding: 14px clamp(16px, 4vw, 24px) max(16px, calc(env(safe-area-inset-bottom, 0px) + 12px));
           font-size: 12px;
-          line-height: 1.45;
           letter-spacing: 0.02em;
           color: var(--fg-faint);
           text-align: center;
@@ -572,145 +911,96 @@ export default function ProductShowcaseClient() {
           will-change: opacity, transform;
         }
 
+        .product-media {
+          width: min(340px, 78vw);
+          height: 240px;
+          border-radius: 24px;
+          overflow: hidden;
+          box-shadow: 0 20px 50px rgba(13, 12, 11, 0.18);
+          margin-bottom: clamp(20px, 2.6vw, 28px);
+          background: #fff;
+        }
+        .product-media img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+        }
+
         .eyebrow {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          flex-wrap: wrap;
-          gap: 6px 12px;
           font-size: 12.5px;
           letter-spacing: 0.045em;
           color: var(--fg-soft);
-          margin-bottom: clamp(16px, 2vw, 22px);
-          max-width: min(46ch, 100%);
-          text-align: center;
+          margin-bottom: 10px;
         }
 
         .panel h1 {
           font-weight: 400;
-          font-size: clamp(34px, 7.1vw, 104px);
-          line-height: 0.98;
-          letter-spacing: -0.036em;
-          max-width: 15ch;
+          font-size: clamp(28px, 5.6vw, 64px);
+          line-height: 1.02;
+          letter-spacing: -0.03em;
+          max-width: 16ch;
           text-wrap: balance;
         }
 
         .sub {
-          margin-top: clamp(18px, 2.2vw, 28px);
-          font-size: clamp(15px, 1.28vw, 19px);
+          margin-top: 12px;
+          font-size: clamp(14px, 1.2vw, 17px);
           line-height: 1.5;
-          letter-spacing: -0.008em;
+          letter-spacing: -0.006em;
           color: var(--fg-soft);
           max-width: min(46ch, 100%);
-          text-wrap: pretty;
+        }
+
+        .stat-row {
+          margin-top: 18px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 14px;
+          color: var(--fg-soft);
+        }
+        .stat-dot {
+          width: 9px;
+          height: 9px;
+          border-radius: 999px;
+        }
+        .stat-dot.in {
+          background: #22c55e;
+        }
+        .stat-dot.out {
+          background: #ef4444;
         }
 
         .cta {
-          margin-top: clamp(28px, 3.4vw, 44px);
+          margin-top: clamp(22px, 3vw, 32px);
           pointer-events: auto;
-          width: 100%;
-          display: flex;
-          justify-content: center;
-        }
-        .cta .pill {
-          height: 48px;
-          padding: 0 27px;
-          font-size: 15px;
-          max-width: min(100%, 320px);
         }
 
         .track {
           position: relative;
           z-index: 1;
-          height: 560vh;
-          min-height: 3200px;
-        }
-
-        @media (max-width: 900px) {
-          .veil {
-            background: linear-gradient(
-                to bottom,
-                rgba(242, 240, 236, 0.72) 0%,
-                rgba(242, 240, 236, 0.18) 24%,
-                rgba(242, 240, 236, 0.18) 76%,
-                rgba(242, 240, 236, 0.74) 100%
-              ),
-              radial-gradient(100% 80% at 50% 48%, rgba(242, 240, 236, 0) 0%, rgba(242, 240, 236, 0.4) 100%),
-              rgba(242, 240, 236, 0.24);
-          }
         }
 
         @media (max-width: 720px) {
-          .nav a:not(.pill) {
-            display: none;
-          }
           .mark {
             font-size: 14px;
           }
-          .nav .pill {
-            height: 38px;
-            padding: 0 16px;
-            font-size: 13.5px;
+          .account-chip {
+            font-size: 12px;
+            padding: 6px 12px;
+            gap: 8px;
           }
           .panel h1 {
-            max-width: 12ch;
-            font-size: clamp(30px, 9.8vw, 52px);
+            max-width: 13ch;
+            font-size: clamp(26px, 8vw, 40px);
           }
           .sub {
-            font-size: 15px;
-            max-width: 34ch;
-          }
-          .panel {
-            padding: max(92px, calc(env(safe-area-inset-top, 0px) + 76px)) 18px
-              max(88px, calc(env(safe-area-inset-bottom, 0px) + 72px));
+            font-size: 14px;
+            max-width: 32ch;
           }
           .foot {
             font-size: 11px;
             max-width: 34ch;
-          }
-        }
-
-        @media (max-width: 420px) {
-          .mark-star {
-            display: none;
-          }
-          .nav .pill {
-            height: 36px;
-            padding: 0 14px;
-            font-size: 13px;
-          }
-          .panel h1 {
-            max-width: 11ch;
-            font-size: clamp(28px, 10.5vw, 40px);
-          }
-          .eyebrow {
-            font-size: 11px;
-            letter-spacing: 0.04em;
-            max-width: 28ch;
-          }
-          .cta .pill {
-            width: 100%;
-            max-width: 280px;
-            height: 44px;
-            padding: 0 20px;
-            font-size: 14px;
-          }
-        }
-
-        @media (max-height: 520px) and (orientation: landscape) {
-          .panel {
-            padding: max(72px, calc(env(safe-area-inset-top, 0px) + 56px)) 24px
-              max(64px, calc(env(safe-area-inset-bottom, 0px) + 48px));
-          }
-          .panel h1 {
-            font-size: clamp(28px, 8vh, 44px);
-          }
-          .sub {
-            margin-top: 12px;
-            font-size: 14px;
-          }
-          .cta {
-            margin-top: 16px;
           }
         }
       `}</style>
